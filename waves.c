@@ -173,21 +173,21 @@ static void analyze_audio(void) {
     /* Automatic Gain Control (AGC) peak normalization */
     double current_energy = na * 10.0;
     if (current_energy > running_peak) {
-        running_peak = running_peak * 0.8 + current_energy * 0.2; /* Fast attack */
+        running_peak = running_peak * 0.85 + current_energy * 0.15; /* Slower attack for smoothness */
     } else {
-        running_peak = running_peak * 0.992 + current_energy * 0.008; /* Slow decay */
+        running_peak = running_peak * 0.995 + current_energy * 0.005; /* Slower decay */
     }
     if (running_peak < 0.05) running_peak = 0.05;
 
     double agc = 0.15 / running_peak;
-    if (agc > 5.0) agc = 5.0;
+    if (agc > 4.0) agc = 4.0;
     if (agc < 0.2) agc = 0.2;
 
-    /* Smooth envelopes with AGC level applied */
-    bass   = bass   * 0.72 + clampd(nb * 9.0 * agc, 0, 1) * 0.28;
-    mid    = mid    * 0.72 + clampd(nm * 12.0 * agc, 0, 1) * 0.28;
-    treble = treble * 0.72 + clampd(nt * 16.0 * agc, 0, 1) * 0.28;
-    overall= overall* 0.75 + clampd(na * 10.0 * agc, 0, 1) * 0.25;
+    /* Smoothed envelopes with heavier low-pass filtering to prevent sudden spikes */
+    bass   = bass   * 0.82 + clampd(nb * 8.0 * agc, 0, 1) * 0.18;
+    mid    = mid    * 0.82 + clampd(nm * 10.0 * agc, 0, 1) * 0.18;
+    treble = treble * 0.82 + clampd(nt * 12.0 * agc, 0, 1) * 0.18;
+    overall= overall* 0.85 + clampd(na * 8.0 * agc, 0, 1) * 0.15;
 }
 
 static short rgb_to_256(int r, int g, int b) {
@@ -233,9 +233,8 @@ static int color_pair_for_rgb(int r, int g, int b) {
 }
 
 static void spectrum_color(double mix, double energy, int *r, int *g, int *b) {
-    /* High-vibrancy HSV-to-RGB conversion with audio hue modulation, time shift, and deep contrast shading */
-    double low = clampd(bass * 1.5 + 0.1, 0, 1);
-    double hue = fmod(mix * 1.4 + bass * 0.5 - treble * 0.3 + (phase * 0.08) + (palette_mode == 1 ? 0.33 : (palette_mode == 2 ? 0.66 : 0.0)), 1.0);
+    double low = clampd(bass * 1.2 + 0.1, 0, 1);
+    double hue = fmod(mix * 1.4 + bass * 0.3 - treble * 0.2 + (phase * 0.05) + (palette_mode == 1 ? 0.33 : (palette_mode == 2 ? 0.66 : 0.0)), 1.0);
     if (hue < 0) hue += 1.0;
 
     double sector = hue * 6.0;
@@ -255,8 +254,7 @@ static void spectrum_color(double mix, double energy, int *r, int *g, int *b) {
         default:rr = 1.0; gg = p;   bb = q;   break;
     }
 
-    /* Boost brightness, deep saturation, and audio-reactive punch */
-    double boost = clampd(energy * 1.35 + 0.3 + (low * 0.25), 0.25, 1.0);
+    double boost = clampd(energy * 1.25 + 0.3 + (low * 0.2), 0.25, 1.0);
     *r = (int)clampd(rr * boost * 255.0, 0, 255);
     *g = (int)clampd(gg * boost * 255.0, 0, 255);
     *b = (int)clampd(bb * boost * 255.0, 0, 255);
@@ -310,58 +308,58 @@ int main(void) {
         double now = now_seconds();
         double dt = clampd(now - last, 0.001, 0.08);
         last = now;
-        phase += dt * speed * (1.4 + bass*3.0 + overall*1.2);
+        
+        /* Dampened phase step to prevent sudden jerky timeline jumps */
+        phase += dt * speed * (1.1 + bass * 0.8 + overall * 0.4);
 
         erase();
         if (h < 2 || w < 2) { refresh(); napms(20); continue; }
 
-        /* Each terminal cell draws two vertical pixels using upper-half block.
-           Top and bottom have independent colors, producing a 2x-height grid. */
         for (int y=0; y<h; ++y) {
             for (int x=0; x<w; ++x) {
                 double nx = (double)x / (w > 1 ? w-1 : 1);
                 double ny = (double)(2*y) / (2*h > 1 ? 2*h-1 : 1);
-                double scroll = nx * 9.0 - phase;
-                double f1 = 1.0 + bass*3.5;
-                double f2 = 2.2 + mid*4.0;
-                double f3 = 4.0 + treble*5.0;
+                double scroll = nx * 8.0 - phase;
+                
+                /* Softer frequency scaling to keep wave curvature smooth */
+                double f1 = 1.0 + bass * 1.5;
+                double f2 = 2.0 + mid * 2.0;
+                double f3 = 3.0 + treble * 2.5;
 
-                double wave1 = sin(scroll*f1 + phase*0.45);
-                double wave2 = sin(scroll*f2 - phase*0.70 + cos(nx*3.0));
-                double wave3 = sin(scroll*f3 + phase*1.15 + ny*2.0);
+                double wave1 = sin(scroll * f1 + phase * 0.35);
+                double wave2 = sin(scroll * f2 - phase * 0.50 + cos(nx * 2.5));
+                double wave3 = sin(scroll * f3 + phase * 0.85 + ny * 1.5);
+                
                 double center = 0.5
-                    + amplitude * (0.19*wave1*(0.35+bass)
-                    + 0.12*wave2*(0.25+mid)
-                    + 0.07*wave3*(0.20+treble));
-                center += 0.08 * sin(phase*0.5 + nx*2.0) * (0.2+overall);
-                double thickness = 0.055 + 0.18*overall + 0.10*bass;
+                    + amplitude * (0.20 * wave1 * (0.6 + bass * 0.4)
+                    + 0.12 * wave2 * (0.6 + mid * 0.3)
+                    + 0.06 * wave3 * (0.6 + treble * 0.2));
+                center += 0.05 * sin(phase * 0.4 + nx * 2.0) * (0.3 + overall * 0.7);
+                
+                double thickness = 0.06 + 0.12 * overall + 0.06 * bass;
                 double distance = fabs(ny - center);
                 double glow = exp(-distance / (thickness + 0.01));
-                /* Extra harmonics make a fluid, multi-frequency ribbon. */
-                double ripple = 0.5 + 0.5*sin(scroll*2.0 + phase + ny*7.0);
-                double energy = clampd(glow * (0.55 + 0.45*ripple)
-                                       * (0.35 + overall*1.4), 0, 1);
-                double hue_mix = clampd(0.15 + 0.42*nx + 0.25*treble
-                                        - 0.15*bass, 0, 1);
-                int r1,g1,b1,r2,g2,b2;
-                spectrum_color(hue_mix, energy, &r1,&g1,&b1);
+                
+                double ripple = 0.5 + 0.5 * sin(scroll * 1.8 + phase + ny * 5.0);
+                double energy = clampd(glow * (0.6 + 0.4 * ripple)
+                                       * (0.4 + overall * 1.2), 0, 1);
+                double hue_mix = clampd(0.15 + 0.42 * nx + 0.2 * treble
+                                        - 0.1 * bass, 0, 1);
+                int r1, g1, b1, r2, g2, b2;
+                spectrum_color(hue_mix, energy, &r1, &g1, &b1);
 
-                double lower_ny = ny + 1.0/(2.0*h);
+                double lower_ny = ny + 1.0 / (2.0 * h);
                 double lower_dist = fabs(lower_ny - center);
-                double lower_glow = exp(-lower_dist/(thickness+0.01));
-                double lower_energy = clampd(lower_glow*(0.55+0.45*ripple)
-                                             *(0.35+overall*1.4), 0, 1);
-                spectrum_color(clampd(hue_mix+0.08,0,1), lower_energy,
-                               &r2,&g2,&b2);
+                double lower_glow = exp(-lower_dist / (thickness + 0.01));
+                double lower_energy = clampd(lower_glow * (0.6 + 0.4 * ripple)
+                                             * (0.4 + overall * 1.2), 0, 1);
+                spectrum_color(clampd(hue_mix + 0.08, 0, 1), lower_energy,
+                               &r2, &g2, &b2);
 
-                int p1 = color_pair_for_rgb(r1,g1,b1);
-                int p2 = color_pair_for_rgb(r2,g2,b2);
-                /* Black/background cells stay dark; bright wave cells use two
-                   colored half-blocks. */
+                int p1 = color_pair_for_rgb(r1, g1, b1);
+                int p2 = color_pair_for_rgb(r2, g2, b2);
+                
                 if (energy > 0.055 || lower_energy > 0.055) {
-                    /* U+2580 fills the upper half of the cell. The terminal
-                       cell's lower half remains the default background; the
-                       full logical pixel grid is therefore 2x terminal height. */
                     cchar_t cell;
                     wchar_t chars[2] = { L'▀', L'\0' };
                     (void)p2;
@@ -373,7 +371,6 @@ int main(void) {
             }
         }
 
-        /* Compact status line on the bottom row; it also confirms audio state. */
         attrset(A_BOLD);
         if (h > 0) {
             char status[160];
@@ -388,7 +385,6 @@ int main(void) {
         refresh();
         napms(25);
     }
-
     running = 0;
     pthread_join(tid, NULL);
     endwin();
