@@ -5,7 +5,9 @@ Compile with:
 <br><br>
 clang waves.c -o waves -lncurses -lpulse -lpulse-simple -lm
 <br><br>
-https://github.com/user-attachments/assets/07fbfbed-2818-4f5c-bb60-cf76a9ed0993
+https://github.com/user-attachments/assets/ca38546e-a370-4308-962a-e549e3bcaf6d
+
+
 
 
 
